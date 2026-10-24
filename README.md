@@ -2,7 +2,7 @@
 
 Minecraft 服务器的闲置自动关服与网页一键启动工具。
 
-在一台常开的 Mac 上运行一个管家进程，定时检查服务器有没有人在玩，没人就关掉；需要的时候在网页上点一个按钮，服务器自己起来。不用 SSH 登录，也不用在宽带上开放入站端口。
+在一台常开的 Mac 上运行一个管家进程，定时检查服务器有没有人在玩，没人自动关服；需要的时候在网页上点击启动即可。不需要 SSH 登录或开放入站端口。
 
 ## 功能特点
 
@@ -42,7 +42,8 @@ docs/
 
 ## 安装说明
 
-环境要求：macOS，Python 3.9 以上（系统自带），服务端需要支持 RCON（原版与 NeoForge/Forge 都支持）。
+环境要求：macOS（Linux 可改用 Systemd），Python 3.9+，服务端需要支持 RCON（原版/NeoForge/Forge/Fabric/Spigot/Paper 等服务端都支持）。
+远程服务器需要 PHP 7.4+
 
 ### 1. 服务端开启 RCON
 
@@ -55,14 +56,14 @@ rcon.password=<用 openssl rand -hex 16 生成一个>
 broadcast-rcon-to-ops=true
 ```
 
-密码单独存文件，不要写进脚本：
+密码单独存入文件：
 
 ```bash
 umask 077
 printf '%s' '刚才生成的密码' > ~/mc-server/bin/rcon.pass
 ```
 
-### 2. 部署管家
+### 2. 部署管家进程
 
 ```bash
 mkdir -p ~/mc-server/bin ~/mc-server/logs
@@ -71,7 +72,7 @@ chmod +x ~/mc-server/bin/*.py
 chmod +x ~/mc-server/server/run.sh
 ```
 
-先在前台运行，确认能连上 RCON：
+先在前台运行以确认能连上 RCON：
 
 ```bash
 python3 ~/mc-server/bin/rcon.py list
@@ -80,7 +81,7 @@ python3 ~/mc-server/bin/rcon.py list
 
 日志出现 `agent 启动` 即正常，`Ctrl+C` 退出。
 
-### 3. 交给 launchd
+### 3. 启动 launchd
 
 把 `mac/com.example.mcagent.plist` 里三处 `/Users/YOURNAME/mc-server` 换成真实路径，Label 改成不冲突的名字，然后：
 
@@ -95,7 +96,7 @@ tail -f ~/mc-server/logs/agent.log
 
 ### 4. 部署网页
 
-把 `cloud/index.php` 放到网站根目录（宝塔面板最省事，PHP 7.4 以上即可），改掉文件顶部的 `AGENT_TOKEN`：
+把 `cloud/index.php` 放到网站根目录，修改文件顶部的 `AGENT_TOKEN`：
 
 ```bash
 openssl rand -hex 16
@@ -115,7 +116,7 @@ openssl rand -hex 16
 
 1. 浏览器打开网页，点「启动服务器」。
 2. 页面显示「启动中」，约一分钟后变为「运行中」。
-3. 需要进服务器控制台执行命令时，在 Mac 上 `screen -r mc`，按 `Ctrl+A` 再按 `D` 分离，服务端不会停止。
+3. 需要进服务器控制台执行命令时，在 Mac 上 `screen -r mc`，按 `Control+A` 再按 `D` 分离，服务端不会停止。
 
 ## 配置参数
 
@@ -137,7 +138,7 @@ openssl rand -hex 16
 
 时间窗按 30 分钟划分。一个窗口内没有人登录过，且窗口结束时也没有人在线，才算一个空窗。连续累计三个空窗后关服。中间只要有人上线，计数立刻清零，即使只停留一分钟。
 
-关服通过 RCON 发送 `stop`，与玩家在游戏里执行 `/stop` 效果相同，会正常存盘退出。
+关服通过 RCON 发送 `stop`，与玩家在游戏里或后台执行 `/stop` 效果相同，会正常存盘退出。
 
 执行关服前会再查一次在线人数，若此时有人连接则取消，计数一并清零。
 
@@ -182,6 +183,6 @@ curl -s -o /dev/null -w '%{http_code}\n' https://你的域名/?action=health
 
 MIT License，详见 [LICENSE](LICENSE) 文件。
 
-## 作者
 
-本项目由 DeepSeek 编写。
+
+本项目由 DeepSeek 辅助编写。
