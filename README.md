@@ -1,66 +1,88 @@
 # mc-serverkeeper
 
-家里的 Mac 跑着一个 Minecraft 私服。开着费电，关了自己又懒得回去开，所以写了这个小东西。
+Minecraft 服务器的闲置自动关服与网页一键启动工具。
 
-它管两件事：没人的时候自动关服；想玩的时候，在网页上点一下按钮就能起来。手机上能点，别人的电脑上也能点，不用 SSH 登录，也不用给路由器开放入站端口。
+在一台常开的 Mac 上运行一个管家进程，定时检查服务器有没有人在玩，没人就关掉；需要的时候在网页上点一个按钮，服务器自己起来。不用 SSH 登录，也不用在宽带上开放入站端口。
 
-## 它是怎么跑起来的
+## 功能特点
+
+- **闲置自动关服**：连续三个 30 分钟的时间窗都没人上线，通过 RCON 正常关闭服务端（存盘退出，不是 kill）。
+- **网页一键启动**：浏览器或手机上打开页面点按钮，约一分钟服务器就绪，页面状态自动刷新。
+- **不需要入站端口**：由 Mac 主动轮询云服务器，不开端口、不做内网穿透，NAT 后面也能用。
+- **状态可见**：页面区分未启动、启动中、运行中、关闭中、管家离线五种状态。
+- **通用探活接口**：`?action=health` 返回 200 或 503，只反映管家进程是否存活，任何 HTTP 监控都能接入。
+
+## 工作原理
 
 ```
-   玩家 ──▶ 网页上的按钮 ──▶ 云服务器 index.php
-                                  ▲      │
-                        每 5 秒问一次    │ 下发「启动」
-                                  │      ▼
-                              Mac 上的管家 ──▶ screen ──▶ Minecraft
+   玩家 ──▶ 网页按钮 ──▶ 云服务器 index.php
+                              ▲    │
+                    每 5 秒轮询 │    │ 下发启动指令
+                              │    ▼
+                          Mac 管家 ──▶ screen ──▶ Minecraft 服务端
 ```
 
-家里那台机器上跑一个管家进程，每 5 秒去问一次云服务器「有事吗」，收到启动指令就把服务器拉起来。云服务器上只有一个 PHP 文件，记状态、给网页提供数据。
+云服务器上只放一个 PHP 文件，记录状态、响应网页请求；Mac 上的管家每 5 秒取一次指令，同时定期上报心跳。
 
-家里主动去问，而不是让云端反向连进来，是因为大多数家用宽带都在 NAT 后面，反过来连得靠打洞或者内网穿透。主动轮询只要机器能上网就行。
+## 目录结构
 
-## 装
+```
+mac/
+  agent.py                   管家进程
+  rcon.py                    RCON 客户端（Python 标准库实现）
+  start.sh                   启动服务端
+  boot.sh                    launchd 入口
+  com.example.mcagent.plist  launchd 配置模板
+  cloud.conf.example         云端配置模板
+cloud/
+  index.php                  网页与状态存储
+docs/
+  design.md                  设计说明与踩坑记录
+```
 
-### 1. 服务端打开 RCON
+## 安装说明
 
-编辑 `server/server.properties`：
+环境要求：macOS，Python 3.9 以上（系统自带），服务端需要支持 RCON（原版与 NeoForge/Forge 都支持）。
+
+### 1. 服务端开启 RCON
+
+编辑服务端目录下的 `server.properties`：
 
 ```properties
 enable-rcon=true
 rcon.port=25575
-rcon.password=<openssl rand -hex 16 生成一个>
+rcon.password=<用 openssl rand -hex 16 生成一个>
 broadcast-rcon-to-ops=true
 ```
 
-密码单独存文件，别写在脚本里：
+密码单独存文件，不要写进脚本：
 
 ```bash
 umask 077
 printf '%s' '刚才生成的密码' > ~/mc-server/bin/rcon.pass
 ```
 
-### 2. 起管家
+### 2. 部署管家
 
 ```bash
-chmod +x ~/mc-server/server/run.sh
+mkdir -p ~/mc-server/bin ~/mc-server/logs
 cp mac/agent.py mac/rcon.py ~/mc-server/bin/
 chmod +x ~/mc-server/bin/*.py
+chmod +x ~/mc-server/server/run.sh
 ```
 
-先在前台跑一下看看日志，出现「agent 启动」就说明通了：
-
-```bash
-~/mc-server/bin/agent.py
-```
-
-顺手确认 RCON 能用：
+先在前台运行，确认能连上 RCON：
 
 ```bash
 python3 ~/mc-server/bin/rcon.py list
+~/mc-server/bin/agent.py
 ```
+
+日志出现 `agent 启动` 即正常，`Ctrl+C` 退出。
 
 ### 3. 交给 launchd
 
-`mac/com.example.mcagent.plist` 里三处 `/Users/YOURNAME/mc-server` 换成真实路径，Label 换个不冲突的名字，然后：
+把 `mac/com.example.mcagent.plist` 里三处 `/Users/YOURNAME/mc-server` 换成真实路径，Label 改成不冲突的名字，然后：
 
 ```bash
 cp com.example.mcagent.plist ~/Library/LaunchAgents/com.example.mcagent.plist
@@ -69,55 +91,59 @@ launchctl kickstart -k gui/$(id -u)/com.example.mcagent
 tail -f ~/mc-server/logs/agent.log
 ```
 
-`KeepAlive=true` 让它挂了自动重启，`ThrottleInterval=10` 防止它反复崩溃时空转。
+`KeepAlive=true` 让进程挂掉后自动重启，`ThrottleInterval=10` 避免反复崩溃时空转。
 
-想进游戏控制台敲命令的话：`screen -r mc`，出来按 `Ctrl+A` 再按 `D`，这样是 detach，服务器不会停。
+### 4. 部署网页
 
-### 4. 网页
-
-`cloud/index.php` 丢到网站根目录（宝塔最省事，PHP 7.4 以上就行），改掉第 13 行的 `AGENT_TOKEN`：
+把 `cloud/index.php` 放到网站根目录（宝塔面板最省事，PHP 7.4 以上即可），改掉文件顶部的 `AGENT_TOKEN`：
 
 ```bash
 openssl rand -hex 16
 ```
 
-然后在 Mac 上写 `~/mc-server/cloud.conf`，权限 600：
+然后在 Mac 上创建 `~/mc-server/cloud.conf`，权限设为 600：
 
 ```json
-{"url": "https://mc.example.com", "token": "和 AGENT_TOKEN 一样"}
+{"url": "https://你的域名", "token": "与 AGENT_TOKEN 一致"}
 ```
 
-重启管家，日志里出现 `云端=已配置` 就通了。打开网页点按钮，大概一分钟服务器起来。
+重启管家，日志出现 `云端=已配置` 即连通。
 
-> 页面会在自己旁边建 `data/state.json`，确认 Web 用户对那个目录有写权限。
+页面会在同目录下创建 `data/state.json`，确认 Web 用户对该目录有写权限。
 
-## 参数
+## 使用方法
 
-`agent.py` 都不用改，环境变量能覆盖：
+1. 浏览器打开网页，点「启动服务器」。
+2. 页面显示「启动中」，约一分钟后变为「运行中」。
+3. 需要进服务器控制台执行命令时，在 Mac 上 `screen -r mc`，按 `Ctrl+A` 再按 `D` 分离，服务端不会停止。
 
-| 变量 | 默认 | 说明 |
+## 配置参数
+
+`agent.py` 无需修改，环境变量可以覆盖：
+
+| 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `MC_BASE` | `~/mc-server` | 根目录 |
-| `MC_SERVER_DIR` | `$MC_BASE/server` | 服务器目录，里面要有 run.sh |
-| `MC_WINDOW_SEC` | `1800` | 一个时间窗多长 |
-| `MC_IDLE_K` | `3` | 连续几个空窗后关服，默认一共 1.5 小时 |
-| `MC_CHECK_INTERVAL` | `60` | 多久查一次在线人数 |
-| `MC_REPORT_INTERVAL` | `15` | 多久给云端报一次心跳 |
-| `MC_HEALTH_INTERVAL` | `10` | 多久探一次 25565 端口 |
+| `MC_SERVER_DIR` | `$MC_BASE/server` | 服务端目录，需包含 `run.sh` |
+| `MC_WINDOW_SEC` | `1800` | 单个时间窗长度 |
+| `MC_IDLE_K` | `3` | 连续几个空窗后关服，默认合计 1.5 小时 |
+| `MC_CHECK_INTERVAL` | `60` | 检查在线人数的间隔 |
+| `MC_REPORT_INTERVAL` | `15` | 向云端上报心跳的间隔 |
+| `MC_HEALTH_INTERVAL` | `10` | 探测 25565 端口的间隔 |
 
-`index.php` 顶上两个常量：`AGENT_TOKEN` 必须改，`OFFLINE_SEC`（默认 45 秒）决定多久没心跳算管家离线。
+`index.php` 顶部两个常量：`AGENT_TOKEN` 必须修改；`OFFLINE_SEC` 默认 45 秒，决定多久没心跳判定管家离线。
 
-## 几条规矩
+## 关服规则
 
-空窗是这么算的：30 分钟一个窗口，窗口里没人登录过、而且窗口结束时正好也没人在线，才算一个空窗。连着攒够 3 个就关服。中间只要有人上线，计数立刻清零，哪怕他只待了一分钟。
+时间窗按 30 分钟划分。一个窗口内没有人登录过，且窗口结束时也没有人在线，才算一个空窗。连续累计三个空窗后关服。中间只要有人上线，计数立刻清零，即使只停留一分钟。
 
-关服走的是 RCON 的 `stop`，跟玩家在游戏里打 `/stop` 一样，会正常存盘退出。不用 kill。
+关服通过 RCON 发送 `stop`，与玩家在游戏里执行 `/stop` 效果相同，会正常存盘退出。
 
-真到关服那一步会再查一次人数，万一有人正连进来就取消，计数也一并清零。
+执行关服前会再查一次在线人数，若此时有人连接则取消，计数一并清零。
 
-服务器停了不会自己再起来，得去网页上点。不然刚关掉又被拉起来，来回折腾。
+服务器关闭后不会自动重新启动，需要在网页上手动点击，避免刚关掉又被拉起。
 
-## 状态
+## 状态说明
 
 ```
 starting ──▶ running ──▶ stopping ──▶ stopped_by_idle
@@ -125,37 +151,37 @@ starting ──▶ running ──▶ stopping ──▶ stopped_by_idle
                  └──────────────▶ crashed
 ```
 
-`stopped_by_idle` 和 `crashed` 都不会自动拉起，等你在网页上点。端口还开着但 RCON 连续 3 次不通，会判成 `crashed`，应付那种进程没退但主循环卡死的情况。
+`stopped_by_idle` 与 `crashed` 都不会自动拉起，等待网页上的操作。若端口仍在监听但 RCON 连续三次无响应，判定为 `crashed`，对应进程未退出但主循环卡死的情况。
 
 ## HTTP 接口
 
-除了给网页用的 `status` / `start`，`index.php` 还有一个 `?action=health`：
+除网页使用的 `status` 与 `start` 外，`index.php` 提供 `?action=health`：
 
-- 管家 45 秒内有心跳 → `200`
-- 没心跳了 → `503`
+- 管家 45 秒内有心跳：`200`
+- 心跳超时：`503`
 
-它只反映管家活没活着，跟服务器开没开无关。定时关服是正常行为，不该报警。
+该接口只反映管家是否存活，与服务器开没开无关。定时关服属于正常行为，不应触发告警。
 
-所以任何能发 HTTP 请求的监控系统都能接：UptimeKuma 建个 HTTP(s) 监控指过来，Zabbix 加个 web 检查，或者干脆 cron 里 curl 一下。
+因此任何能发送 HTTP 请求的监控系统都可以接入，例如 UptimeKuma 的 HTTP(s) 监控、Zabbix 的 Web 检查，或直接使用 cron 定时 curl：
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://mc.example.com/?action=health
+curl -s -o /dev/null -w '%{http_code}\n' https://你的域名/?action=health
 ```
 
-这样只有机器关机、管家进程死了、或者家里断网，监控才会红。
+这样只有机器关机、管家进程退出或家中断网时，监控才会报警。
 
-## 踩过的坑
+## 常见问题
 
-详细的写在 [docs/design.md](docs/design.md)。最要紧的两条先放这儿：
+**启动后 screen 会话立刻消失，日志为空**：服务端解压后 `run.sh` 通常没有执行权限，先执行 `chmod +x run.sh`。
 
-服务端压缩包解压出来，`run.sh` 经常没有执行权限。这时候 screen 拉起来会瞬间退出，日志里一个字都没有，能查很久。第一件事先 `chmod +x`。
+**25575 端口对外暴露**：Minecraft 的 RCON 强制监听 `0.0.0.0`，配置无法修改。机器有公网 IP 时，应在防火墙上阻止外部访问该端口。
 
-RCON 强制监听 `0.0.0.0`，配置里改不了。机器有公网 IP 的话，记得在防火墙上把 25575 挡掉。
+更多问题与设计取舍见 [docs/design.md](docs/design.md)。
 
-## License
+## 许可证
 
-MIT
+MIT License，详见 [LICENSE](LICENSE) 文件。
 
 ## 作者
 
-Kit T.（呆猫）
+本项目由 DeepSeek 编写。
