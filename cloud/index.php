@@ -117,7 +117,7 @@ if ($action === 'report') {
     json_out(['ok' => true]);
 }
 
-// 健康检查：给 UptimeKuma 用。管家程序活着就 200，掉了才 503
+// 健康检查：给外部监控用。管家程序活着就 200，掉了才 503
 // 注意这只反映「管家在线」，不反映 MC 开没开——定时关服时依然是 200
 if ($action === 'health') {
     $s   = read_state();
