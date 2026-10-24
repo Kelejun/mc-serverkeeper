@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  用法：
+  1. 把三处 /Users/YOURNAME/mc-server 换成你的真实路径
+  2. 把 com.example.mcagent 换成不会和别人冲突的名字
+  3. cp 到 ~/Library/LaunchAgents/ 然后：
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.mcagent.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.example.mcagent</string>
+<key>ProgramArguments</key><array>
+  <string>/usr/bin/python3</string>
+  <string>/Users/YOURNAME/mc-server/bin/agent.py</string>
+</array>
+<key>WorkingDirectory</key><string>/Users/YOURNAME/mc-server</string>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>StandardOutPath</key><string>/Users/YOURNAME/mc-server/logs/agent.out.log</string>
+<key>StandardErrorPath</key><string>/Users/YOURNAME/mc-server/logs/agent.err.log</string>
+<key>EnvironmentVariables</key><dict>
+  <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin</string>
+  <key>TERM</key><string>xterm-256color</string>
+</dict>
+</dict></plist>

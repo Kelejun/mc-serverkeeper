@@ -1,0 +1,4 @@
+{
+  "url": "https://mc.example.com",
+  "token": "与 cloud/index.php 里的 AGENT_TOKEN 保持一致"
+}
